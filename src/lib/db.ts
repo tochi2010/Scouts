@@ -1,4 +1,5 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
+import { scoutingStorageKey } from './scoutingSession'
 import type { GameConfig } from '../types/gameConfig'
 
 export interface MatchEntry {
@@ -6,6 +7,7 @@ export interface MatchEntry {
   gameId: string
   matchNumber: string
   teamNumber: string
+  alliance?: 'red' | 'blue'
   scoutName: string
   createdAt: number
   /** field id -> value (number | boolean | string) */
@@ -91,7 +93,7 @@ let dbPromise: Promise<IDBPDatabase<ScoutingDB>> | null = null
 
 function getDb() {
   if (!dbPromise) {
-    dbPromise = openDB<ScoutingDB>('scouting-db', 2, {
+    dbPromise = openDB<ScoutingDB>(scoutingStorageKey('scouting-db'), 2, {
       upgrade(db, oldVersion) {
         if (oldVersion < 1) {
           const matches = db.createObjectStore('matches', { keyPath: 'id' })
@@ -123,6 +125,24 @@ export async function listMatches(gameId: string): Promise<MatchEntry[]> {
 export async function deleteMatch(id: string) {
   const db = await getDb()
   await db.delete('matches', id)
+}
+
+export async function clearGameData(gameId: string) {
+  const db = await getDb()
+  const tx = db.transaction('matches', 'readwrite')
+  const matches = await tx.objectStore('matches').index('by-gameId').getAllKeys(gameId)
+  for (const id of matches) await tx.objectStore('matches').delete(id)
+  await tx.done
+}
+
+export async function clearAllScoutingData() {
+  const db = await getDb()
+  const tx = db.transaction(['matches', 'pitReports'], 'readwrite')
+  await Promise.all([
+    tx.objectStore('matches').clear(),
+    tx.objectStore('pitReports').clear(),
+  ])
+  await tx.done
 }
 
 export async function saveGameConfig(config: GameConfig) {

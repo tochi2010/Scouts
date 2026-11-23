@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { scoutingStorageKey } from '../lib/scoutingSession'
 
 export type Tier = 'tier1' | 'tier2' | 'tier3' | 'doNotPick' | 'uncategorized'
 
@@ -30,6 +31,6 @@ export const usePicklistStore = create<PicklistState>()(
         })
       },
     }),
-    { name: 'scouting-picklist-v2' },
+    { name: scoutingStorageKey('scouting-picklist-v2') },
   ),
 )

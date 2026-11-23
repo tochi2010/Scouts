@@ -5,7 +5,7 @@ import { presets, withPresetPoints } from '../data/presets'
 import { loadGameConfig } from '../lib/db'
 import { useTeam, mayaGlyphs } from '../data/team'
 import { useDisplayPrefsStore, type Accent } from '../store/useDisplayPrefsStore'
-import { MoonIcon, SunIcon, WarningIcon } from '@phosphor-icons/react'
+import { MoonIcon, SunIcon, WarningIcon, DownloadSimpleIcon, UploadSimpleIcon } from '@phosphor-icons/react'
 
 
 const ACCENTS: [Accent, string, string][] = [
@@ -146,22 +146,30 @@ export function ConfigEditor() {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-bold">Juego</h2>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {presets.map((p) => (
-            <button
-              key={p.gameId}
-              className={`rounded-2xl border p-4 text-left ${config.gameId === p.gameId ? 'border-acc bg-acc/10' : 'border-transparent bg-n215'}`}
-              onClick={() => loadPreset(p)}
-            >
-              <p className="font-extrabold">{p.gameName}</p>
-              <p className="text-xs text-n72">
-                {p.mode} · alianzas de {p.mode === 'FRC' ? 3 : 2}
-              </p>
-            </button>
-          ))}
-        </div>
-      </section>
+              <h2 className="text-lg font-bold">Juego</h2>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {presets.map((p) => (
+                  <button
+                    key={p.gameId}
+                    className={`rounded-2xl border p-4 text-left ${config.gameId === p.gameId ? 'border-acc bg-acc/10' : 'border-transparent bg-n215'}`}
+                    onClick={() => loadPreset(p)}
+                  >
+                    <p className="font-extrabold">{p.gameName}</p>
+                    <p className="text-xs text-n72">
+                      {p.mode} · alianzas de {p.mode === 'FRC' ? 3 : 2}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            {config.gameId === 'ftc-biobuzz-2026' && (
+              <section className="space-y-3">
+                <h2 className="text-lg font-bold">Importar datos de prueba</h2>
+                <p className="text-sm text-n75">Carga los 5 equipos y 2 matches del Salk League Meet 1 (analizados desde YouTube).</p>
+                <ImportDataButton />
+              </section>
+            )}
 
       <section className="flex flex-col gap-2.5">
         <div className="flex flex-wrap items-baseline justify-between gap-2.5">
@@ -202,6 +210,53 @@ export function ConfigEditor() {
           </div>
         </div>
       )}
-    </div>
-  )
-}
+          </div>
+        )
+      }
+
+      function ImportDataButton() {
+        const { importData, importing, matches } = useScoutStore()
+        const [result, setResult] = useState<{ imported: number; skipped: number } | null>(null)
+
+        const handleImport = async () => {
+          try {
+            const res = await importData()
+            setResult(res)
+            setTimeout(() => setResult(null), 5000)
+          } catch (e) {
+            console.error('Import failed:', e)
+          }
+        }
+
+        return (
+          <div className="flex items-center gap-3">
+            <button
+              className="min-h-12 rounded-xl bg-acc px-5 font-extrabold text-on-acc"
+              onClick={handleImport}
+              disabled={importing || matches.length > 0}
+            >
+              {importing ? (
+                <>
+                  <UploadSimpleIcon size={18} weight="fill" className="animate-spin mr-2" />
+                  Importando...
+                </>
+              ) : (
+                <>
+                  <DownloadSimpleIcon size={18} weight="fill" className="mr-2" />
+                  Importar 5 equipos / 2 matches
+                </>
+              )}
+            </button>
+            {matches.length > 0 && (
+              <span className="text-xs text-n72">
+                Ya hay {matches.length} partidos. Limpia la BD para re-importar.
+              </span>
+            )}
+            {result && (
+              <span className="text-sm font-bold text-grn">
+                ✓ Importados {result.imported}, saltados {result.skipped}
+              </span>
+            )}
+          </div>
+        )
+      }

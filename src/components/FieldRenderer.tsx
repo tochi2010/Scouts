@@ -46,7 +46,7 @@ export function FieldRenderer({ field, value, onChange }: Props) {
           >
             −
           </button>
-          <div className="flex items-center justify-center font-mono text-[34px] font-bold">{n}</div>
+          <div className="flex items-center justify-center font-mono text-[34px] font-bold">{typeof value === 'number' ? n : '—'}</div>
           <button
             aria-label="Sumar"
             className="h-16 select-none rounded-xl bg-acc text-[34px] font-semibold text-on-acc active:brightness-90"
@@ -66,7 +66,7 @@ export function FieldRenderer({ field, value, onChange }: Props) {
           onClick={() => onChange(!on)}
         >
           {on ? <CheckCircleIcon size={24} weight="fill" /> : <CircleIcon size={24} />}
-          {on ? 'Sí' : 'No'}
+          {on ? 'Sí' : value === false ? 'No' : 'Sin registrar'}
         </button>
       )
     }

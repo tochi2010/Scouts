@@ -150,6 +150,28 @@ function PitForm({
 }) {
   const [values, setValues] = useState<Record<string, number | boolean | string>>(existing?.values ?? {})
   const [saving, setSaving] = useState(false)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [aiMessage, setAiMessage] = useState('')
+
+  async function handleAiPit() {
+    setAnalyzing(true)
+    setAiMessage('')
+    try {
+      const response = await fetch(`/ai-api/api/ai/pit/${encodeURIComponent(team.teamNumber)}`, { method: 'POST' })
+      const payload = await response.json() as { source?: string; fields?: Record<string, unknown>; detail?: string }
+      if (!response.ok) throw new Error(payload.detail || `Error ${response.status}`)
+      const fields = payload.fields ?? {}
+      const next: Record<string, number | boolean | string> = {}
+      if (['Mecanum', 'Swerve', 'Tanque', 'Otro'].includes(String(fields.drivetrainType))) next.drivetrainType = String(fields.drivetrainType)
+      if (typeof fields.pitCanLaunch === 'boolean') next.pitCanLaunch = fields.pitCanLaunch
+      if (typeof fields.pitCanFlower === 'boolean') next.pitCanFlower = fields.pitCanFlower
+      if (typeof fields.pitAutoTips === 'number' && Number.isInteger(fields.pitAutoTips) && fields.pitAutoTips >= 0) next.pitAutoTips = fields.pitAutoTips
+      next.pitNotes = `IA: ${String(fields.pitNotes ?? 'Sin detalles adicionales.')} Fuente: ${payload.source ?? 'sin enlace'}. Tren motriz, FLOWERS y TIPs prometidos en Auto no verificados por la IA; cualquier valor anterior en esos campos requiere revisión.`
+      setValues((prev) => ({ ...prev, ...next }))
+      setAiMessage('Sugerencias cargadas. Revisa y pulsa Guardar pit.')
+    } catch (error) { setAiMessage(error instanceof Error ? error.message : 'No se pudo analizar') }
+    finally { setAnalyzing(false) }
+  }
 
   async function handleSave() {
     // guarda contra doble-tap, mismo patrón que MatchForm
@@ -183,6 +205,11 @@ function PitForm({
             <XIcon size={20} weight="bold" />
           </button>
         </div>
+
+        <button className="min-h-12 rounded-xl bg-acc px-4 font-bold text-on-acc disabled:opacity-50" disabled={analyzing} onClick={handleAiPit}>
+          {analyzing ? 'Analizando con Gemini…' : 'Completar con IA'}
+        </button>
+        {aiMessage && <p className="text-sm text-n75">{aiMessage}</p>}
 
         {fields.map((field) => (
           <div key={field.id} className="flex flex-col gap-2.5">

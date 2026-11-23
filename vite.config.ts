@@ -6,6 +6,15 @@ import { VitePWA } from 'vite-plugin-pwa'
 // https://vite.dev/config/
 export default defineConfig({
   base: './',
+  server: {
+    proxy: {
+      '/ai-api': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/ai-api/, ''),
+      },
+    },
+  },
   plugins: [
     react(),
     tailwindcss(),

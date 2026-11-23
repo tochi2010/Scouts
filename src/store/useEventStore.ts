@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { scoutingStorageKey } from '../lib/scoutingSession'
 import type { EventTeam, EventRanking, EventMatch } from '../types/tba'
 import { fetchTbaTeams, fetchTbaRankings, fetchTbaMatches } from '../lib/tbaApi'
 import { fetchFtcEventTeams, fetchFtcEventRankings, fetchFtcEventMatches } from '../lib/ftcScoutApi'
@@ -49,7 +50,7 @@ export const useEventStore = create<EventState>()(
       tbaApiKey: '',
       tbaEventKey: '',
       ftcSeason: new Date().getMonth() >= 8 ? new Date().getFullYear() : new Date().getFullYear() - 1,
-      ftcEventCode: '',
+      ftcEventCode: import.meta.env.VITE_FTC_EVENT_CODE ?? '',
       teams: [],
       rankings: [],
       matches: [],
@@ -96,7 +97,7 @@ export const useEventStore = create<EventState>()(
       },
     }),
     {
-      name: 'scouting-event-store',
+      name: scoutingStorageKey('scouting-event-store'),
       // syncing/error son transitorios: si se persistiera syncing:true (app
       // cerrada a mitad de un fetch), los botones quedarían bloqueados para siempre.
       partialize: ({ syncing: _s, error: _e, ...rest }) => rest,

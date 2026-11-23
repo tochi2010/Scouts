@@ -2,6 +2,7 @@ import { lazy, Suspense, useRef, useState } from 'react'
 import { useScoutStore } from '../store/useScoutStore'
 import { useSyncStore } from '../store/useSyncStore'
 import { useEventStore } from '../store/useEventStore'
+import { usePitStore } from '../store/usePitStore'
 import {
   ArrowsLeftRightIcon,
   ClipboardTextIcon,
@@ -17,6 +18,7 @@ import {
 import { validateMatchEntry, type MatchEntry } from '../lib/db'
 import { compressMatch } from '../lib/qr'
 import { QrCode } from './QrCode'
+import { importAiMatches } from '../lib/aiBridge'
 
 const QrScanner = lazy(() => import('./QrScanner').then((m) => ({ default: m.QrScanner })))
 const SyncPanel = lazy(() => import('./SyncPanel').then((m) => ({ default: m.SyncPanel })))
@@ -44,13 +46,15 @@ function download(filename: string, content: string, mime: string) {
 }
 
 export function MatchList() {
-  const { config, matches, removeMatch, addMatch } = useScoutStore()
+  const { config, matches, removeMatch, addMatch, clearData } = useScoutStore()
   const fileRef = useRef<HTMLInputElement>(null)
   const [copied, setCopied] = useState(false)
   const [qrMatch, setQrMatch] = useState<MatchEntry | null>(null)
   const [scanning, setScanning] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [importMsg, setImportMsg] = useState<string | null>(null)
+  const [importingAi, setImportingAi] = useState(false)
+  const [confirmClear, setConfirmClear] = useState(false)
   const syncStatus = useSyncStore((s) => s.status)
 
   async function handleImport(file: File) {
@@ -84,6 +88,64 @@ export function MatchList() {
     setTimeout(() => setCopied(false), 1500)
   }
 
+  async function handleAiImport() {
+    setImportingAi(true)
+    try {
+      const { matches: entries, pits } = await importAiMatches()
+      const existing = new Map(useScoutStore.getState().matches.map((match) => [match.id, match]))
+      let addedMatches = 0
+      for (const entry of entries.filter((row) => row.gameId === config.gameId)) {
+        const current = existing.get(entry.id)
+        if (!current) {
+          await addMatch(entry)
+          addedMatches++
+          continue
+        }
+        if (!entry.id.startsWith('capture-ai-')) continue
+        const missing = Object.fromEntries(Object.entries(entry.values).filter(([key]) => current.values[key] === undefined))
+        if (typeof current.values.notes === 'string' && typeof entry.values.notes === 'string') {
+          const prefix = 'Datos pendientes de este robot · '
+          const pending = entry.values.notes.split('\n').find(line => line.startsWith(prefix))
+          const notes = current.values.notes.split('\n').filter(line => !line.startsWith(prefix))
+          if (pending) notes.push(pending)
+          const updated = notes.join('\n')
+          if (updated !== current.values.notes) missing.notes = updated
+        }
+        if (Object.keys(missing).length) {
+          await addMatch({ ...current, alliance: current.alliance ?? entry.alliance, values: { ...current.values, ...missing } })
+          addedMatches++
+        }
+      }
+      const pitStore = usePitStore.getState()
+      const gamePits = pits.filter((pit) => pit.gameId === config.gameId)
+      let addedPits = 0
+      if (gamePits.length) await pitStore.init()
+      for (const pit of gamePits) {
+        const current = usePitStore.getState().reports.find((report) => report.id === pit.id)
+        const missing = Object.fromEntries(Object.entries(pit.values).filter(([key]) => current?.values[key] === undefined))
+        if (!Object.keys(missing).length) continue
+        await pitStore.saveReport({ ...pit, values: { ...missing, ...current?.values } })
+        addedPits++
+      }
+      setImportMsg(addedMatches || addedPits ? `✓ ${addedMatches} registros de partido y ${addedPits} pits importados para revisión.` :
+        entries.length ? 'No hay registros nuevos para el juego seleccionado.' :
+        'Todavía no hay partidos analizados para importar.')
+    } catch (e) {
+      setImportMsg(`✗ Importación AI falló: ${e instanceof Error ? e.message : 'backend no disponible'}`)
+    } finally { setImportingAi(false) }
+  }
+
+  async function handleClearData() {
+    setConfirmClear(false)
+    try {
+      await clearData()
+      usePitStore.setState({ reports: [], loaded: true })
+      setImportMsg('✓ Partidos y datos de pit borrados. Listo para comenzar desde cero.')
+    } catch {
+      setImportMsg('No se pudieron borrar los partidos.')
+    }
+  }
+
   const fieldIds = config.fields.map((f) => f.id)
   const [delId, setDelId] = useState<string | null>(null)
   const eventTeams = useEventStore((s) => s.teams)
@@ -91,6 +153,7 @@ export function MatchList() {
   const hasPoints = config.fields.some((f) => f.points !== undefined)
 
   const allianceOf = (m: MatchEntry) => {
+    if (m.alliance === 'red' || m.alliance === 'blue') return m.alliance
     const r = eventMatches.find((x) => String(x.matchNumber) === m.matchNumber)
     if (!r) return null
     return r.red.map(String).includes(m.teamNumber) ? 'red' : r.blue.map(String).includes(m.teamNumber) ? 'blue' : null
@@ -107,6 +170,7 @@ export function MatchList() {
     ['Exportar CSV', FileCsvIcon, () => download(`${config.gameId}-matches.csv`, toCsv(matches, fieldIds), 'text/csv')],
     [copied ? '✓ Copiado' : 'Copiar', CopyIcon, handleCopy],
     ['Importar JSON', UploadSimpleIcon, () => fileRef.current?.click()],
+    ['Borrar datos', TrashIcon, () => setConfirmClear(true)],
   ]
 
   const rows = matches
@@ -121,6 +185,19 @@ export function MatchList() {
       </div>
 
       <div className="flex flex-wrap gap-2">
+        {config.mode === 'FTC' && (
+          <a href="http://127.0.0.1:8000/" target="_blank" rel="noreferrer"
+            className="flex min-h-14 flex-[1_1_180px] items-center justify-center rounded-[14px] bg-n27 px-4 font-bold">
+            Captura automática
+          </a>
+        )}
+        <button
+          className="flex min-h-14 flex-[1_1_220px] items-center justify-center gap-2 rounded-[14px] bg-grn px-4 font-extrabold text-on-grn disabled:opacity-50"
+          onClick={handleAiImport}
+          disabled={importingAi}
+        >
+          {importingAi ? 'Importando análisis…' : 'Importar análisis AI'}
+        </button>
         <button
           className="flex min-h-14 flex-[1_1_160px] items-center justify-center gap-2 rounded-[14px] bg-acc px-4 font-extrabold text-on-acc"
           onClick={() => setScanning(true)}
@@ -158,6 +235,13 @@ export function MatchList() {
         />
       </div>
 
+      {confirmClear && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-n33 p-3">
+          <p>Se borrarán todos los partidos y datos de pit guardados en este dispositivo.</p>
+          <button className="rounded-lg bg-n27 px-3 py-2" onClick={() => setConfirmClear(false)}>Cancelar</button>
+          <button className="rounded-lg bg-acc px-3 py-2 text-on-acc" onClick={handleClearData}>Confirmar borrado total</button>
+        </div>
+      )}
       {importMsg && <p className="text-sm font-bold text-n75">{importMsg}</p>}
 
       {syncing && (
@@ -192,6 +276,49 @@ export function MatchList() {
                     </span>
                   </div>
                   <span className="text-[13px] text-n75">{meta}</span>
+                  <details className="mt-1 text-sm">
+                    <summary className="cursor-pointer font-semibold">Ver scouting</summary>
+                    {(['prematch', 'auto', 'teleop', 'endgame', 'subjective'] as const).map((phase) => {
+                      const labels = { prematch: 'Inicio', auto: 'Autónomo', teleop: 'TeleOp', endgame: 'Endgame', subjective: 'Subjetivo' }
+                      const fields = config.fields.filter((field) => field.phase === phase)
+                      if (!fields.length) return null
+                      return (
+                        <section key={phase} className="mt-3">
+                          <h2 className="font-bold">{labels[phase]}</h2>
+                          <dl className="grid gap-1">
+                            {fields.map((field) => {
+                              const value = m.values[field.id]
+                              if (field.type === 'fieldMap' && typeof value === 'string') {
+                                const xy = value.split(',').map(Number)
+                                if (xy.length === 2 && xy.every((p) => Number.isFinite(p) && p >= 0 && p <= 100)) {
+                                  const [x, y] = xy
+                                  return (
+                                    <div key={field.id}>
+                                      <dt className="text-n75">{field.label}</dt>
+                                      <dd>
+                                        <div className="relative mt-1 max-w-64 overflow-hidden rounded-md">
+                                          <img src={field.imageUrl} alt="Mapa del campo" className="block w-full" />
+                                          <span aria-hidden="true" className="absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-acc"
+                                            style={{ left: `${x}%`, top: `${y}%` }} />
+                                        </div>
+                                        <span>X {x}%, Y {y}%{m.id.startsWith('capture-ai-') ? ' · estimado por vídeo' : ''}</span>
+                                      </dd>
+                                    </div>
+                                  )
+                                }
+                              }
+                              return (
+                                <div key={field.id} className="break-words">
+                                  <dt className="inline text-n75">{field.label} · </dt>
+                                  <dd className="inline whitespace-pre-wrap">{value === true ? 'Sí' : value === false ? 'No' : value ?? 'Sin verificar'}</dd>
+                                </div>
+                              )
+                            })}
+                          </dl>
+                        </section>
+                      )
+                    })}
+                  </details>
                 </div>
                 <div className="flex gap-1.5">
                   <button aria-label="QR" className="flex h-12 w-12 items-center justify-center rounded-xl bg-n27" onClick={() => setQrMatch(m)}>
